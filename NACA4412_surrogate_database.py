@@ -27,14 +27,14 @@ def naca4412_camber_baseline(x, m=0.04, p=0.40):
     
     dyc_dx = np.where(x<p, 
              2*m/p**2 * (p-x),
-             (2*m/(1-p))**2 * (p-x)
+             (2*m/(1-p)**2) * (p-x)
              )
     
     return yc, dyc_dx
 
 def generate_morphed_naca4412(delta, x_h=0.70, n_points=2000):
 # use cosine spacing to create normalized positions from the leading to trailing edge
-    beta = np.linspace(0, np.pi, n_points / 2)
+    beta = np.linspace(0, np.pi, n_points // 2)
     x = (1.0 - np.cos(beta)) / 2.0
 
 # extract the baseline camber line and its derivative across the ENTIRE grid
@@ -47,7 +47,7 @@ def generate_morphed_naca4412(delta, x_h=0.70, n_points=2000):
     y0_h, dy0_h = yc_h[0], dyc_h[0]
 
     l = 1.0 - x_h
-    A = (delta - dy0_h * l - y0_h) / (l**2)
+    A = (-delta - dy0_h * l - y0_h) / (l**2)
     B = dy0_h
     C = y0_h
 
@@ -66,3 +66,38 @@ def generate_morphed_naca4412(delta, x_h=0.70, n_points=2000):
     yu = yc + yt * np.cos(theta)
     xl = x + yt * np.sin(theta)
     yl = yc - yt * np.cos(theta)
+
+# order the points
+    x_coords = np.concatenate([xu[::-1], xl[1:]])
+    y_coords = np.concatenate([yu[::-1], yl[1:]])
+    return np.column_stack((x_coords, y_coords))
+
+Cl_matrix = np.zeros((len(delta_range), len(alpha_range)))
+Cd_matrix = np.zeros((len(delta_range), len(alpha_range)))
+
+# run NeuralFoil
+for i, delta in enumerate(delta_range):
+    coords = generate_morphed_naca4412(delta=delta, x_h=0.70)
+    airfoil = asb.Airfoil(name=f"morphed_delta_{delta}", coordinates=coords)
+    
+    for j, alpha in enumerate(alpha_range):
+        aero = nf.get_aero_from_airfoil(
+            airfoil=airfoil,
+            alpha=float(alpha),
+            Re=Re
+        )
+# extract scalar values        
+        Cl_matrix[i, j] = float(np.squeeze(aero['CL']))
+        Cd_matrix[i, j] = float(np.squeeze(aero['CD']))
+
+col_names = [f"alpha_{a}deg" for a in alpha_range]
+
+df_Cl = pd.DataFrame(Cl_matrix, index=delta_range, columns=col_names)
+df_Cl.index.name = "delta"
+df_Cl.to_csv("Cl_lookup_table.csv")
+
+df_Cd = pd.DataFrame(Cd_matrix, index=delta_range, columns=col_names)
+df_Cd.index.name = "delta"
+df_Cd.to_csv("Cd_lookup_table.csv")
+
+print("files 'Cl_lookup_table.csv' and 'Cd_lookup_table.csv' generated successfully.")
